@@ -4,6 +4,7 @@ pydantic==2.9.0
 pydantic-settings==2.5.0
 apscheduler==3.10.4
 pyautogui==0.9.54
+pyperclip==1.9.0
 sqlalchemy==2.0.35
 aiosqlite==0.20.0
 python-dotenv==1.0.1

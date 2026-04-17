@@ -1,12 +1,13 @@
 """
 企业微信桌面客户端 RPA 执行器
 
-通过 pyautogui 操控 macOS 企业微信桌面客户端完成消息发送。
-预留 OCR / 图像匹配扩展接口。
+通过 pyautogui 操控企业微信桌面客户端完成消息发送。
+支持 Windows 和 macOS。预留 OCR / 图像匹配扩展接口。
 """
 
 import json
 import logging
+import platform
 import subprocess
 import time
 from datetime import datetime
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Optional, Protocol
 
 import pyautogui
+import pyperclip
 
 from app.config.settings import settings
 
@@ -22,6 +24,12 @@ logger = logging.getLogger(__name__)
 # 安全设置
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = settings.rpa_step_delay
+
+IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
+
+# 修饰键：Windows 用 ctrl，macOS 用 command
+_MOD_KEY = "ctrl" if IS_WINDOWS else "command"
 
 
 # === 扩展接口 ===
@@ -78,6 +86,52 @@ def take_screenshot(task_id: str, step: str) -> Optional[str]:
 # === 核心 RPA 步骤 ===
 
 def activate_wecom():
+    """激活企业微信窗口（跨平台）"""
+    if IS_WINDOWS:
+        _activate_wecom_windows()
+    elif IS_MACOS:
+        _activate_wecom_macos()
+    else:
+        raise RuntimeError(f"不支持的操作系统: {platform.system()}")
+
+
+def _activate_wecom_windows():
+    """激活企业微信窗口（Windows）— 使用 pyautogui 查找窗口"""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+
+    # 尝试查找企业微信窗口
+    title = settings.wecom_window_title
+    hwnd = user32.FindWindowW(None, title)
+    if not hwnd:
+        # 尝试启动企业微信
+        try:
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", title],
+                shell=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(3)
+            hwnd = user32.FindWindowW(None, title)
+        except Exception:
+            pass
+
+    if hwnd:
+        # 恢复最小化窗口
+        SW_RESTORE = 9
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        # 置前
+        user32.SetForegroundWindow(hwnd)
+        time.sleep(settings.rpa_step_delay)
+        logger.info("企业微信窗口已激活 (Windows)")
+    else:
+        raise RuntimeError("无法找到企业微信窗口，请确认企业微信已启动")
+
+
+def _activate_wecom_macos():
     """激活企业微信窗口（macOS）"""
     script = f'''
     tell application "System Events"
@@ -91,21 +145,21 @@ def activate_wecom():
     try:
         subprocess.run(["osascript", "-e", script], check=True, timeout=5)
         time.sleep(settings.rpa_step_delay)
-        logger.info("企业微信窗口已激活")
+        logger.info("企业微信窗口已激活 (macOS)")
     except Exception as e:
         raise RuntimeError(f"无法激活企业微信窗口: {e}") from e
 
 
 def open_search():
-    """打开搜索框 (Cmd+F)"""
-    pyautogui.hotkey("command", "f")
+    """打开搜索框 (Ctrl+F / Cmd+F)"""
+    pyautogui.hotkey(_MOD_KEY, "f")
     time.sleep(settings.rpa_search_wait)
 
 
 def search_user(keyword: str):
     """在搜索框输入关键字并等待结果"""
     # 清空已有内容
-    pyautogui.hotkey("command", "a")
+    pyautogui.hotkey(_MOD_KEY, "a")
     time.sleep(0.1)
     pyautogui.press("delete")
     time.sleep(0.1)
@@ -133,10 +187,10 @@ def send_message():
 
 
 def _type_chinese(text: str):
-    """通过剪贴板粘贴方式输入中文"""
+    """通过剪贴板粘贴方式输入中文（跨平台）"""
     try:
-        subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True, timeout=2)
-        pyautogui.hotkey("command", "v")
+        pyperclip.copy(text)
+        pyautogui.hotkey(_MOD_KEY, "v")
         time.sleep(0.2)
     except Exception:
         # fallback: 逐字符输入（可能丢失中文）
